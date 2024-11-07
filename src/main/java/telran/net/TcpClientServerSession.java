@@ -23,6 +23,7 @@ public class TcpClientServerSession implements Runnable {
                 String response = protocol.getResponseWithJSON(request);
                 writer.println(response);
             }
+            socket.close();
         } catch (Exception e) {
             System.out.println(e);
         }

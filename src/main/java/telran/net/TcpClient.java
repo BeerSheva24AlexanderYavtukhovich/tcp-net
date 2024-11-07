@@ -14,6 +14,7 @@ import static telran.net.TcpConfigurationProperties.DEFAULT_INTERVAL_CONNECTION;
 import static telran.net.TcpConfigurationProperties.DEFAULT_TRIALS_NUMBER_CONNECTION;
 import static telran.net.TcpConfigurationProperties.RESPONSE_CODE_FIELD;
 import static telran.net.TcpConfigurationProperties.RESPONSE_DATA_FIELD;
+import telran.net.exceptions.ServerUnavailableException;
 
 public class TcpClient implements Closeable {
     Socket socket;
@@ -44,15 +45,17 @@ public class TcpClient implements Closeable {
                 writer = new PrintStream(socket.getOutputStream());
                 reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 count = 0;
-            } catch (IOException ex) {
+            } catch (IOException e) {
                 waitForInterval();
                 count--;
             }
 
         } while (count != 0);
+        if (socket == null) {
+            throw new ServerUnavailableException(host, port);
+        }
     }
 
-    @SuppressWarnings("empty-statement")
     private void waitForInterval() {
         Instant finish = Instant.now().plusMillis(interval);
         while (Instant.now().isBefore(finish))
@@ -61,13 +64,20 @@ public class TcpClient implements Closeable {
 
     @Override
     public void close() throws IOException {
-        socket.close();
+        if (socket != null) {
+            socket.close();
+        }
+
     }
 
     public String sendAndReceive(String requestType, String requestData) {
         Request request = new Request(requestType, requestData);
+
         try {
-            writer.println(request); 
+            if (socket == null) {
+                throw new ServerUnavailableException(host, port);
+            }
+            writer.println(request);
             String responseJSON = reader.readLine();
             JSONObject jsonObj = new JSONObject(responseJSON);
             ResponseCode responseCode = jsonObj.getEnum(ResponseCode.class, RESPONSE_CODE_FIELD);
@@ -76,10 +86,10 @@ public class TcpClient implements Closeable {
                 throw new RuntimeException(responseData);
             }
             return responseData;
-        } catch (IOException ex) {
-            throw new RuntimeException("Server is unavailable");
+        } catch (IOException e) {
+            connect();
+            throw new ServerUnavailableException(host, port);
         }
-
     }
 
 }
