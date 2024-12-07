@@ -16,7 +16,7 @@ import static telran.net.TcpConfigurationProperties.RESPONSE_CODE_FIELD;
 import static telran.net.TcpConfigurationProperties.RESPONSE_DATA_FIELD;
 import telran.net.exceptions.ServerUnavailableException;
 
-public class TcpClient implements Closeable {
+public class TcpClient implements Closeable, NetworkClient {
     Socket socket;
     PrintStream writer;
     BufferedReader reader;
