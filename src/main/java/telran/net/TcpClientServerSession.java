@@ -36,7 +36,7 @@ public class TcpClientServerSession implements Runnable {
                 processRequest(request, writer);
             }
         } catch (SocketTimeoutException e) {
-            System.out.println("Socket timeout: no activity.");
+            System.out.println("Socket timeout: no activity."); // for testing
         } catch (IOException | RuntimeException e) {
             System.out.println(e.getMessage());
         } finally {
