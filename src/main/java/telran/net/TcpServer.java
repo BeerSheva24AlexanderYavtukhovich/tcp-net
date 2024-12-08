@@ -20,36 +20,23 @@ public class TcpServer implements Runnable {
     public void run() {
         try (ServerSocket serverSocket = new ServerSocket(port)) {
             serverSocket.setSoTimeout(TcpConfigurationProperties.SOCKET_INACTIVITY_TIMEOUT);
-            System.out.println("Server is listening on the port " + port);
+            System.out.println("Server is listening on port " + port);
+
             while (!executorService.isShutdown()) {
                 try {
-                    if (TcpClientServerSession.shutdownNowRequest) {
-                        shutdown();
-                    } else {
-                        Socket socket = serverSocket.accept();
-                        if (!TcpClientServerSession.shutdownNowRequest) {
-                            executorService.execute(new TcpClientServerSession(protocol, socket));
-                        } else {
-                            socket.close();
-                        }
-                    }
+                    Socket socket = serverSocket.accept();
+                    executorService.execute(new TcpClientServerSession(protocol, socket));
                 } catch (SocketTimeoutException e) {
-                    if (TcpClientServerSession.shutdownNowRequest) {
-                        shutdown();
-                    }
                 }
             }
         } catch (Exception e) {
             System.out.println(e.getMessage());
         } finally {
-            if (!executorService.isShutdown()) {
-                shutdown();
-            }
+            shutdown();
         }
     }
 
     public void shutdown() {
-        TcpClientServerSession.shutdownNowRequest();
         executorService.shutdownNow();
         System.out.println("Shutdown complete");
     }
