@@ -27,16 +27,25 @@ public class TcpClientServerSession implements Runnable {
                 PrintStream writer = new PrintStream(socket.getOutputStream())) {
 
             socket.setSoTimeout(TcpConfigurationProperties.SOCKET_INACTIVITY_TIMEOUT);
-            String request;
-            while ((request = reader.readLine()) != null && !rateLimitExceeded && !notOkResponsesLimitExceeded) {
-                if (dosProtection.isRateLimitExceeded()) {
-                    rateLimitExceeded = true;
-                    System.out.println("Potential attack: Too many requests per second."); // for testing
+            String request = null;
+
+            while (!rateLimitExceeded && !notOkResponsesLimitExceeded) {
+                try {
+                    request = reader.readLine();
+                } catch (SocketTimeoutException e) {
+                    // System.out.println("Socket timeout: no activity."); // for testing
+                    continue;
                 }
-                processRequest(request, writer);
+
+                if (request != null) {
+                    if (dosProtection.isRateLimitExceeded()) {
+                        rateLimitExceeded = true;
+                        //System.out.println("Potential attack: Too many requests per second."); // for testing
+                    } else {
+                        processRequest(request, writer);
+                    }
+                }
             }
-        } catch (SocketTimeoutException e) {
-            System.out.println("Socket timeout: no activity."); // for testing
         } catch (IOException | RuntimeException e) {
             System.out.println(e.getMessage());
         } finally {
@@ -50,7 +59,7 @@ public class TcpClientServerSession implements Runnable {
         Response response = parseResponse(responseJSON);
         if (dosProtection.isNotOkLimitExceeded(response.responseCode())) {
             notOkResponsesLimitExceeded = true;
-            System.out.println("Potential attack: Too many not ok responses."); // for testing
+            //System.out.println("Potential attack: Too many not ok responses."); // for testing
         }
     }
 
