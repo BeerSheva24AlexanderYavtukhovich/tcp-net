@@ -1,82 +1,73 @@
 package telran.net;
 
 import java.io.BufferedReader;
-import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
-
-import org.json.JSONObject;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 public class TcpClientServerSession implements Runnable {
     Protocol protocol;
     Socket socket;
-    private final DosProtection dosProtection = new DosProtection();
-    private boolean rateLimitExceeded = false;
-    private boolean notOkResponsesLimitExceeded = false;
+    TcpServer server;
+    int idleTimeout;
+    int requestsPerSecond;
+    int nonOkResponses;
+    Instant timestamp = Instant.now();
 
-    public TcpClientServerSession(Protocol protocol, Socket socket) {
+    public TcpClientServerSession(Protocol protocol, Socket socket, TcpServer server) {
         this.protocol = protocol;
         this.socket = socket;
+        this.server = server;
     }
 
     @Override
     public void run() {
+
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 PrintStream writer = new PrintStream(socket.getOutputStream())) {
-
-            socket.setSoTimeout(TcpConfigurationProperties.SOCKET_INACTIVITY_TIMEOUT);
             String request = null;
-
-            while (!rateLimitExceeded && !notOkResponsesLimitExceeded) {
+            while (!server.executor.isShutdown() && !isIdleTimeout()) {
                 try {
                     request = reader.readLine();
-                } catch (SocketTimeoutException e) {
-                    // System.out.println("Socket timeout: no activity."); // for testing
-                    continue;
-                }
-
-                if (request != null) {
-                    if (dosProtection.isRateLimitExceeded()) {
-                        rateLimitExceeded = true;
-                        //System.out.println("Potential attack: Too many requests per second."); // for testing
-                    } else {
-                        processRequest(request, writer);
+                    if (request == null || isRequestsPerSecond()) {
+                        break;
                     }
+                    String response = protocol.getResponseWithJSON(request);
+                    if (isNonOkResponses(response)) {
+                        break;
+                    }
+                    writer.println(response);
+                } catch (SocketTimeoutException e) {
+                    idleTimeout += server.socketTimeout;
                 }
             }
-        } catch (IOException | RuntimeException e) {
-            System.out.println(e.getMessage());
-        } finally {
-            closeSocket();
+            socket.close();
+        } catch (Exception e) {
+            System.out.println(e);
         }
     }
 
-    private void processRequest(String request, PrintStream writer) {
-        String responseJSON = protocol.getResponseWithJSON(request);
-        writer.println(responseJSON);
-        Response response = parseResponse(responseJSON);
-        if (dosProtection.isNotOkLimitExceeded(response.responseCode())) {
-            notOkResponsesLimitExceeded = true;
-            //System.out.println("Potential attack: Too many not ok responses."); // for testing
+    private boolean isRequestsPerSecond() {
+        Instant current = Instant.now();
+        if (ChronoUnit.SECONDS.between(timestamp, current) > 1) {
+            requestsPerSecond = 0;
+            timestamp = current;
+        } else {
+            requestsPerSecond++;
         }
+        return requestsPerSecond > server.limitRequestsPerSecond;
     }
 
-    private Response parseResponse(String responseJSON) {
-        JSONObject jsonObj = new JSONObject(responseJSON);
-        ResponseCode responseCode = ResponseCode.valueOf(jsonObj.getString("responseCode"));
-        String responseData = jsonObj.getString("responseData");
-        return new Response(responseCode, responseData);
+    private boolean isNonOkResponses(String response) {
+        nonOkResponses = response.contains("OK") ? 0 : nonOkResponses + 1;
+        return nonOkResponses > server.limitNonOkResponsesInRow;
     }
 
-    private void closeSocket() {
-        try {
-            if (!socket.isClosed()) {
-                socket.close();
-            }
-        } catch (IOException e) {
-            System.out.println(e.getMessage());
-        }
+    private boolean isIdleTimeout() {
+        return idleTimeout > server.idleConnectionTimeout;
     }
+
 }

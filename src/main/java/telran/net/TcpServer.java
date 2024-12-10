@@ -8,56 +8,60 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class TcpServer implements Runnable {
+
     Protocol protocol;
     int port;
-    private final ExecutorService executorService;
-    private boolean isRunning;
-    private ServerSocket serverSocket;
+    ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+    int socketTimeout;
+    int idleConnectionTimeout;
+    int limitRequestsPerSecond;
+    int limitNonOkResponsesInRow;
 
-    public TcpServer(Protocol protocol, int port) {
+    public TcpServer(Protocol protocol, int port, int socketTimeout, int idleConnectionTimeout,
+            int limitRequestsPerSecond, int limitNonOkResponsesInRow) {
         this.protocol = protocol;
         this.port = port;
-        this.executorService = Executors.newFixedThreadPool(TcpConfigurationProperties.N_THREADS);
-        this.isRunning = false;
+        this.socketTimeout = socketTimeout;
+        this.idleConnectionTimeout = idleConnectionTimeout;
+        this.limitRequestsPerSecond = limitRequestsPerSecond;
+        this.limitNonOkResponsesInRow = limitNonOkResponsesInRow;
+    }
+
+    public TcpServer(Protocol protocol, int port, int idleConnectionTimeout) {
+        this(protocol, port, TcpConfigurationProperties.DEFAULT_SOCKET_TIMEOUT, idleConnectionTimeout,
+                TcpConfigurationProperties.DEFAULT_LIMIT_REQUESTS_PER_SEC,
+                TcpConfigurationProperties.DEFAULT_LIMIT_NON_OK_RESPONSES_IN_ROW);
+    }
+
+    public TcpServer(Protocol protocol, int port) {
+        this(protocol, port, TcpConfigurationProperties.DEFAULT_SOCKET_TIMEOUT,
+                TcpConfigurationProperties.DEFAULT_IDLE_CONNECTION_TIMEOUT,
+                TcpConfigurationProperties.DEFAULT_LIMIT_REQUESTS_PER_SEC,
+                TcpConfigurationProperties.DEFAULT_LIMIT_NON_OK_RESPONSES_IN_ROW);
     }
 
     @Override
     public void run() {
-        try {
-            serverSocket = new ServerSocket(port);
-            serverSocket.setSoTimeout(TcpConfigurationProperties.SOCKET_INACTIVITY_TIMEOUT);
-            System.out.println("Server is listening on port " + port);
-            isRunning = true;
-            while (isRunning) {
+        try (ServerSocket serverSocket = new ServerSocket(port)) {
+            System.out.println("Server is listening on the port " + port);
+            serverSocket.setSoTimeout(socketTimeout);
+            while (!executor.isShutdown()) {
                 try {
                     Socket socket = serverSocket.accept();
-                    executorService.execute(new TcpClientServerSession(protocol, socket));
+                    socket.setSoTimeout(socketTimeout);
+                    var session = new TcpClientServerSession(protocol, socket, this);
+                    executor.execute(session);
                 } catch (SocketTimeoutException e) {
+
                 }
             }
-        } catch (IOException e) {
-            System.out.println(e.getMessage());
-        } finally {
-            shutdown();
+        } catch (Exception e) {
+            System.out.println(e);
         }
     }
 
     public void shutdown() {
-        isRunning = false;
-
-        if (serverSocket != null && !serverSocket.isClosed()) {
-            try {
-                serverSocket.close();
-                // System.out.println("Server socket closed.");//for testing
-            } catch (IOException e) {
-                System.err.println(e.getMessage());
-            }
-        }
-        executorService.shutdownNow();
-        System.out.println("Shutdown complete");
+        executor.shutdownNow();
     }
 
-    public boolean isReady() {
-        return isRunning;
-    }
 }
